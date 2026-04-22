@@ -13,8 +13,53 @@ BLEUart bleuart;
 
 // 狀態控制變數
 bool isSendingData = false;
-unsigned long lastSendTime = 0;
-const int SEND_INTERVAL_MS = 1000;
+unsigned long lastSampleTime = 0;
+const int SAMPLE_INTERVAL_MS = 10; // 提高采樣率至 10 毫秒 (100Hz)
+float pressureBuffer[10]; // 建立一個緩衝區儲存 10 次的采樣
+int sampleIndex = 0;
+bool triggerInit = false; // 用於在主迴圈中觸發初始化，避免 Callback 卡死
+bool triggerIICCheck = false; // 用於在主迴圈中觸發 IIC 掃描，避免 Callback 卡死
+
+// ================= 初始化副程式 =================
+void initSensor() {
+  unsigned long startT = millis();
+  Serial.println("開始初始化 BMP581...");
+  if (Bluefruit.connected()) {
+    bleuart.println("-> 開始初始化 BMP581...");
+  }
+  
+  if (bmp58x.begin()) {
+    isBmpReady = true;
+    bmp58x.setMeasureMode(bmp58x.eNormal);
+    unsigned long duration = millis() - startT;
+    
+    Serial.print("BMP581 初始化成功 (0x47), 耗時: ");
+    Serial.print(duration);
+    Serial.println(" ms");
+    
+    if (Bluefruit.connected()) {
+      bleuart.print("-> BMP581 初始化成功 (0x47), 耗時: ");
+      bleuart.print(duration);
+      bleuart.println(" ms");
+      delay(50);
+      
+      // 避免 MTU (20 Bytes) 限制，拆分成多個短指令發送
+      bleuart.println("INIT:OK");
+      delay(50); // 稍微延遲避免藍牙緩衝區塞車
+      bleuart.println("SR:100Hz(Batch)");
+      delay(50);
+      bleuart.println("RNG:30~125kPa");
+    }
+  } else {
+    isBmpReady = false;
+    Serial.println("BMP581 初始化失敗！請檢查硬體。");
+    if (Bluefruit.connected()) {
+      bleuart.println("-> BMP581 初始化失敗！請檢查硬體。");
+      delay(50);
+      bleuart.println("INIT:FAIL");
+    }
+  }
+}
 
 void setup() {
   Serial.begin(115200);
@@ -27,17 +72,14 @@ void setup() {
   pinMode(D5, INPUT_PULLUP);
   Wire.begin();
 
-  if (bmp58x.begin()) {
-    isBmpReady = true;
-    bmp58x.setMeasureMode(bmp58x.eNormal);
-    Serial.println("BMP581 初始化成功 (0x47)");
-  } else {
-    isBmpReady = false;
-    Serial.println("BMP581 初始化失敗！請檢查硬體。");
-  }
+  initSensor();
 
   // 2. 初始化 Bluefruit 藍牙
   Bluefruit.begin();
+  
+  // 原先設定的 configPrphBandwidth(BANDWIDTH_MAX) 可能與某些平臺不相容導致剛連線就斷開。
+  // 我們退回較保守但依然快速的設定
+  Bluefruit.Periph.setConnInterval(12, 40); // 15ms ~ 50ms 
   Bluefruit.setTxPower(4);    // 增加藍牙發射功率，提升穩定度
   Bluefruit.setName("JingQiBMP"); // 設定藍牙名稱
 
@@ -69,24 +111,98 @@ void startAdv() {
 }
 
 void loop() {
-  // 在 Bluefruit 架構下，收發處理已由 Callback 完成
-  // 主迴圈只要專心處理「定時量測與發送資料」即可
-  if (isSendingData && isBmpReady && Bluefruit.connected()) {
-    if (millis() - lastSendTime >= SEND_INTERVAL_MS) {
-      lastSendTime = millis();
-      
-      float pressure = bmp58x.readPressPa();
-      
-      // 組合資料字串，並加上換行符號方便網頁端讀取
-      String dataMsg = "Press: " + String(pressure) + " Pa\n";
-      
-      // 透過藍牙 UART 發送
-      bleuart.print(dataMsg);
-      
-      Serial.print("藍牙發送: ");
-      Serial.print(dataMsg);
+  // 將所有長時延遲和占用 IIC 通訊的工作統一放在主迴圈 (Main Task) 執行，避免在 BLE 內部 Callback 當中因為阻塞導致藍牙當機斷線
+  if (triggerInit && Bluefruit.connected()) {
+    triggerInit = false;
+    delay(500); // 稍微等待，確保通訊通道建立完成
+    initSensor();
+    if (isBmpReady) {
+      bleuart.println("Send 'S' to start, 'P' to pause, 'C' to check.");
     }
   }
+
+  // 在主迴圈中執行耗時的 IIC 總線掃描
+  if (triggerIICCheck && Bluefruit.connected()) {
+    triggerIICCheck = false;
+    
+    bleuart.println("-> Checking IIC Bus...");
+    uint8_t error, address;
+    int nDevices = 0;
+    bool foundBMP581 = false;
+    
+    // IIC 掃描會阻塞很長一段時間，因此必須在 loop 中執行
+    for(address = 1; address < 127; address++ ) {
+      Wire.beginTransmission(address);
+      error = Wire.endTransmission();
+      
+      if (error == 0) {
+        String msg = "-> IIC device found at 0x";
+        if (address < 16) msg += "0";
+        msg += String(address, HEX);
+        if (bleuart.availableForWrite() >= msg.length()) { // 防呆
+            bleuart.println(msg);
+        }
+        if (address == BMP581_ADDR) {
+          foundBMP581 = true;
+        }
+        nDevices++;
+      } else if (error == 4) {
+        String msg = "-> Unknown error at 0x";
+        if (address < 16) msg += "0";
+        msg += String(address, HEX);
+        if (bleuart.availableForWrite() >= msg.length()) { // 防呆
+            bleuart.println(msg);
+        }
+      }
+      delay(5); // 給藍牙堆疊喘息時間
+    }
+    
+    if (nDevices == 0) {
+      bleuart.println("-> MBR: Error! No IIC devices found.");
+    } else {
+      if (foundBMP581) {
+         bleuart.println("-> BMP581 Status: OK (0x47 Connected)");
+      } else {
+         bleuart.println("-> BMP581 Status: Error! (0x47 NOT found)");
+      }
+    }
+  }
+
+  // 主迴圈只要專心處理「定時量測與發送資料」即可
+  if (isSendingData && isBmpReady && Bluefruit.connected()) {
+    if (millis() - lastSampleTime >= SAMPLE_INTERVAL_MS) {
+      lastSampleTime = millis();
+      
+      float pressure = bmp58x.readPressPa();
+      pressureBuffer[sampleIndex] = pressure;
+      sampleIndex++;
+      
+      // 每收集滿 10 筆數據 (約 100ms) 進行一次藍牙打包發送
+      if (sampleIndex >= 10) {
+        // 利用最後一筆資料當作健康狀態判斷
+        String statusVal = (pressureBuffer[9] > 0) ? "1" : "0";
+        
+        // 格式化為: B:val1,val2,...,val10|S:1\n
+        String dataMsg = "B:";
+        for (int i = 0; i < 10; i++) {
+          dataMsg += String(pressureBuffer[i], 2);
+          if (i < 9) dataMsg += ",";
+        }
+        dataMsg += "|S:" + statusVal + "\n";
+        
+        // 直接發送打包後的長字串，底層藍牙協議棧會自動進行分包
+        bleuart.print(dataMsg);
+        
+        Serial.print("藍牙批次發送: ");
+        Serial.print(dataMsg);
+        
+        sampleIndex = 0; // 重置緩衝區指針
+      }
+    }
+  }
+  
+  // 給 Bluefruit 作業系統處理背景藍牙事件的空間
+  delay(1);
 }
 
 // ================= 事件回呼函數 (Callbacks) =================
@@ -101,22 +217,12 @@ void connect_callback(uint16_t conn_handle) {
   Serial.print("已連線至設備: ");
   Serial.println(central_name);
 
-  // 稍微等待，確保通訊通道建立完成
-  delay(500); 
+  // 將連線訊息也同步發送給上位機終端
+  bleuart.print("-> 已連線至設備: ");
+  bleuart.println(central_name);
 
-  // 輸出 BMP 參數
-  if (isBmpReady) {
-    // BLEUart 可以像 Serial 一樣直接用 println
-    bleuart.println("BMP Ready");
-    bleuart.println("- IIC Address: 0x47");
-    bleuart.println("- Range: 30kPa ~ 125kPa");
-    bleuart.println("- Mode: Normal");
-    bleuart.println("Send 'S' to start, 'P' to pause.");
-    Serial.println("已向網頁發送 Ready 訊息與參數");
-  } else {
-    bleuart.println("Error: BMP581 Not Found at 0x47!");
-  }
-  
+  // 利用標誌位，通知主迴圈去執行耗時的元件初始化任務
+  triggerInit = true;
   isSendingData = false; // 預設不發送，等待 S 指令
 }
 
@@ -151,37 +257,7 @@ void rx_callback(uint16_t conn_handle) {
     Serial.println("收到指令: P (暫停發送)");
   } else if (cmd == "C") {
     Serial.println("收到指令: C (自查 IIC)");
-    bleuart.println("-> Checking IIC Bus...");
-    uint8_t error, address;
-    int nDevices = 0;
-    bool foundBMP581 = false;
-    for(address = 1; address < 127; address++ ) {
-      Wire.beginTransmission(address);
-      error = Wire.endTransmission();
-      if (error == 0) {
-        String msg = "-> IIC device found at 0x";
-        if (address < 16) msg += "0";
-        msg += String(address, HEX);
-        bleuart.println(msg);
-        if (address == BMP581_ADDR) {
-          foundBMP581 = true;
-        }
-        nDevices++;
-      } else if (error == 4) {
-        String msg = "-> Unknown error at 0x";
-        if (address < 16) msg += "0";
-        msg += String(address, HEX);
-        bleuart.println(msg);
-      }
-    }
-    if (nDevices == 0) {
-      bleuart.println("-> MBR: Error! No IIC devices found.");
-    } else {
-      if (foundBMP581) {
-         bleuart.println("-> BMP581 Status: OK (0x47 Connected)");
-      } else {
-         bleuart.println("-> BMP581 Status: Error! (0x47 NOT found)");
-      }
-    }
+    // 不能在藍牙 Rx Callback 中直接執行耗時的 Wire 掃描
+    triggerIICCheck = true; 
   }
 }

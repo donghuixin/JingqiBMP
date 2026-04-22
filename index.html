@@ -184,9 +184,14 @@
         <button id="btnDisconnect" class="btn btn-secondary" style="display: none;">斷開連線</button>
         
         <div class="data-display">
+            <div style="display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--text-secondary); margin-bottom: 20px; text-align: left; background: rgba(0,0,0,0.03); padding: 12px; border-radius: 12px;">
+                <div>初始化狀態: <strong id="initStatus">未初始化</strong></div>
+                <div>采樣率: <strong id="sampleRate">--</strong></div>
+                <div>量程: <strong id="rangeValue">--</strong></div>
+            </div>
             <div class="data-label">即時大氣壓力 (Pressure)</div>
             <div id="pressureValue" class="data-value">--</div>
-            <div class="data-label">Pa</div>
+            <div class="data-label">Pa | 傳感器狀態: <span id="sensorStatus">不明</span></div>
         </div>
 
         <div style="display: flex; gap: 10px;">
@@ -229,6 +234,10 @@
     const btnCheck = document.getElementById('btnCheck');
     const statusBadge = document.getElementById('statusBadge');
     const pressureValue = document.getElementById('pressureValue');
+    const sensorStatus = document.getElementById('sensorStatus');
+    const initStatus = document.getElementById('initStatus');
+    const sampleRate = document.getElementById('sampleRate');
+    const rangeValue = document.getElementById('rangeValue');
     const terminal = document.getElementById('terminal');
 
     // ================== Chart.js 初始化 ==================
@@ -261,24 +270,12 @@
             plugins: {
                 legend: { display: false }
             },
-            animation: { duration: 0 } // 關閉動畫提升實時效能
+            animation: false // 關閉動畫提升 10Hz 實時效能
         }
     });
 
-    // 最大顯示資料點
-    const MAX_DATA_POINTS = 50;
-
-    function updateChart(value) {
-        const now = new Date().toLocaleTimeString();
-        chart.data.labels.push(now);
-        chart.data.datasets[0].data.push(value);
-
-        if (chart.data.labels.length > MAX_DATA_POINTS) {
-            chart.data.labels.shift();
-            chart.data.datasets[0].data.shift();
-        }
-        chart.update();
-    }
+    // 最大顯示資料點 (現在 100Hz 採樣，如果設定 500 代表可以看到 5 秒的資料)
+    const MAX_DATA_POINTS = 500;
 
     function log(message) {
         const time = new Date().toLocaleTimeString();
@@ -340,8 +337,12 @@
         btnDisconnect.style.display = 'none';
         btnStart.disabled = true;
         btnCheck.disabled = true;
-        btnPause.disabled = true;
-        log("⚠️ 設備已斷開連線。");
+        btnPause.disabled = true;        
+        initStatus.textContent = "未初始化";
+        initStatus.style.color = "";
+        sampleRate.textContent = "--";
+        rangeValue.textContent = "--";
+                log("⚠️ 設備已斷開連線。");
     }
 
     // 處理收到的數據 (包含斷行處理)
@@ -358,15 +359,64 @@
 
             log("Rx: " + line);
 
-            // 解析氣壓數據，例如韌體發送 "Press: 101325.50 Pa"
-            if (line.startsWith("Press:")) {
-                // 提取數字部分
-                let pressureStr = line.replace("Press: ", "").replace(" Pa", "");
-                let pressureNum = parseFloat(pressureStr);
+            // 解析初始化狀態訊息 (被分為多個短封包防截斷)
+            if (line.startsWith("INIT:OK")) {
+                initStatus.textContent = "成功";
+                initStatus.style.color = "var(--accent-blue)";
+            } else if (line.startsWith("INIT:FAIL")) {
+                initStatus.textContent = "失敗!";
+                initStatus.style.color = "var(--accent-red)";
+                sampleRate.textContent = "--";
+                rangeValue.textContent = "--";
+            } else if (line.startsWith("SR:")) {
+                sampleRate.textContent = line.replace("SR:", "").trim();
+            } else if (line.startsWith("RNG:")) {
+                rangeValue.textContent = line.replace("RNG:", "").trim();
+            }
+
+            // 解析打包發送的氣壓數據，格式如 "B:99120.50,99120.60,...|S:1"
+            if (line.startsWith("B:")) {
+                const parts = line.split("|S:");
                 
-                if (!isNaN(pressureNum)) {
-                    pressureValue.textContent = pressureNum.toFixed(2);
-                    updateChart(pressureNum);
+                if (parts.length === 2) {
+                    const statusStr = parts[1].trim();
+                    if (statusStr === "1") {
+                        sensorStatus.textContent = "OK";
+                        sensorStatus.style.color = "var(--accent-blue)";
+                    } else {
+                        sensorStatus.textContent = "Error";
+                        sensorStatus.style.color = "var(--accent-red)";
+                    }
+                }
+                
+                // 提取並解析這 10 次的歷史數字
+                let dataStr = parts[0].replace("B:", "");
+                let valuesStrArray = dataStr.split(",");
+                let lastValidPressure = 0;
+                
+                // 由於是一次收到 10 筆數值，這邊將它們全部快速倒進圖表
+                for (let v of valuesStrArray) {
+                    let pressureNum = parseFloat(v);
+                    if (!isNaN(pressureNum)) {
+                        lastValidPressure = pressureNum;
+                        
+                        // 雖然是批次送出，但在圖表上這 10 個點都是過去 100ms 產生的
+                        const nowTime = new Date().toLocaleTimeString();
+                        chart.data.labels.push(nowTime);
+                        chart.data.datasets[0].data.push(pressureNum);
+                    }
+                }
+                
+                // 確保圖表資料儲存不會無限膨脹，超過最大點數就捨棄最舊的
+                while (chart.data.labels.length > MAX_DATA_POINTS) {
+                    chart.data.labels.shift();
+                    chart.data.datasets[0].data.shift();
+                }
+                
+                // 每批資料處理完後，僅重繪一次圖表並展示該批次最新一筆代表數值
+                if (lastValidPressure !== 0) {
+                    pressureValue.textContent = lastValidPressure.toFixed(2);
+                    chart.update('none'); // 無痛刷新
                 }
             }
         }
