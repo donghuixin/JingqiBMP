@@ -63,6 +63,7 @@ void setup() {
   pinMode(D4, INPUT_PULLUP);
   pinMode(D5, INPUT_PULLUP);
   Wire.begin();
+  Wire.setClock(100000); // 強制降速至 100kHz，增強抗干擾能力
   initSensor();
 
   // 2. 初始化藍牙
