@@ -38,10 +38,24 @@ void initSensor() {
   }
 }
 
+void setupWDT() {
+  NRF_WDT->CONFIG = 0x01;       // 即使在 Sleep 模式下也運行 WDT
+  NRF_WDT->CRV = 32768 * 3;     // 設置 3 秒超時 (32768 ticks = 1 second)
+  NRF_WDT->RREN = 0x01;         // 啟用 Reload Register 0
+  NRF_WDT->TASKS_START = 1;     // 啟動 WDT
+}
+
+void feedWDT() {
+  NRF_WDT->RR[0] = 0x6E524635;  // 餵狗 (特定魔術數字)
+}
+
 void setup() {
   Serial.begin(115200);
   delay(2000);
   Serial.println("System Starting...");
+
+  // 0. 啟動看門狗 (3秒超時)
+  setupWDT();
 
   // 1. 初始化 I2C
   pinMode(D4, INPUT_PULLUP);
@@ -79,6 +93,9 @@ void startAdv() {
 }
 
 void loop() {
+  // ★ 餵狗：只要 loop 正常運行，就不會重啟
+  feedWDT();
+
   // ★ 初始化：只做感測器初始化，不發任何 BLE 數據
   if (triggerInit && Bluefruit.connected()) {
     triggerInit = false;
