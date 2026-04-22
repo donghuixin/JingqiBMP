@@ -359,7 +359,7 @@
 
             log("Rx: " + line);
 
-            // 解析初始化狀態訊息 (被分為多個短封包防截斷)
+            // 解析初始化狀態訊息
             if (line.startsWith("INIT:OK")) {
                 initStatus.textContent = "成功";
                 initStatus.style.color = "var(--accent-blue)";
@@ -372,9 +372,15 @@
                 sampleRate.textContent = line.replace("SR:", "").trim();
             } else if (line.startsWith("RNG:")) {
                 rangeValue.textContent = line.replace("RNG:", "").trim();
+            } else if (line === "READY") {
+                log("✅ 設備就緒，可以開始操作");
+            } else if (line.startsWith("CMD:")) {
+                log("📋 可用指令: " + line.replace("CMD:", ""));
+            } else if (line.startsWith("IIC:") || line.startsWith("BMP:")) {
+                log("🔍 " + line);
             }
 
-            // 解析打包發送的氣壓數據，格式如 "B:99120.50,99120.60,...|S:1"
+            // 解析打包發送的氣壓數據，格式如 "B:99120,99121,...|S:1"
             if (line.startsWith("B:")) {
                 const parts = line.split("|S:");
                 
@@ -389,34 +395,30 @@
                     }
                 }
                 
-                // 提取並解析這 10 次的歷史數字
+                // 提取並解析這批的壓力數值
                 let dataStr = parts[0].replace("B:", "");
                 let valuesStrArray = dataStr.split(",");
                 let lastValidPressure = 0;
                 
-                // 由於是一次收到 10 筆數值，這邊將它們全部快速倒進圖表
                 for (let v of valuesStrArray) {
                     let pressureNum = parseFloat(v);
                     if (!isNaN(pressureNum)) {
                         lastValidPressure = pressureNum;
-                        
-                        // 雖然是批次送出，但在圖表上這 10 個點都是過去 100ms 產生的
                         const nowTime = new Date().toLocaleTimeString();
                         chart.data.labels.push(nowTime);
                         chart.data.datasets[0].data.push(pressureNum);
                     }
                 }
                 
-                // 確保圖表資料儲存不會無限膨脹，超過最大點數就捨棄最舊的
+                // 確保圖表資料不會無限膨脹
                 while (chart.data.labels.length > MAX_DATA_POINTS) {
                     chart.data.labels.shift();
                     chart.data.datasets[0].data.shift();
                 }
                 
-                // 每批資料處理完後，僅重繪一次圖表並展示該批次最新一筆代表數值
                 if (lastValidPressure !== 0) {
                     pressureValue.textContent = lastValidPressure.toFixed(2);
-                    chart.update('none'); // 無痛刷新
+                    chart.update('none');
                 }
             }
         }
