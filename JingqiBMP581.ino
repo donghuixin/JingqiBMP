@@ -14,7 +14,7 @@ BLEUart bleuart;
 bool isSendingData = false;
 unsigned long lastSampleTime = 0;
 
-// 20Hz 採樣，每次發送 1 筆，消息 ~15 bytes
+// 20Hz 採樣，每次發送 1 筆
 const int SAMPLE_INTERVAL_MS = 50;  // 50ms = 20Hz
 
 bool triggerInit = false;
@@ -49,9 +49,9 @@ void setup() {
   Wire.begin();
   initSensor();
 
-  // 2. 初始化藍牙（使用默認帶寬，不要用 BANDWIDTH_MAX）
+  // 2. 初始化藍牙
   Bluefruit.begin();
-  Bluefruit.Periph.setConnInterval(12, 40); // 15ms ~ 50ms（保守、相容）
+  Bluefruit.Periph.setConnInterval(12, 40); // 15ms ~ 50ms
   Bluefruit.setTxPower(4);
   Bluefruit.setName("JingQiBMP");
 
@@ -80,50 +80,51 @@ void startAdv() {
 
 void loop() {
   // ★ 初始化：只做感測器初始化，不發任何 BLE 數據
-  // 因為此時網頁可能還沒完成 startNotifications() 訂閱
-  // 在訂閱前寫入的數據會塞滿 HVN queue 且永遠不會排空
   if (triggerInit && Bluefruit.connected()) {
     triggerInit = false;
     delay(500);
     initSensor();
-    // ★ 不在這裡發 BLE 消息！等收到 S 指令再發
-    Serial.print("初始化完成，BLE buffer=");
-    Serial.println(bleuart.availableForWrite());
   }
 
   // IIC 自查
   if (triggerIICCheck && Bluefruit.connected()) {
     triggerIICCheck = false;
+
+    Serial.println("IIC Scan...");
     uint8_t error, address;
     int nDevices = 0;
     bool foundBMP581 = false;
 
-    Serial.println("IIC Scan...");
     for (address = 1; address < 127; address++) {
       Wire.beginTransmission(address);
       error = Wire.endTransmission();
       if (error == 0) {
-        Serial.print("IIC device: 0x");
+        Serial.print("IIC: 0x");
         Serial.println(address, HEX);
-        // 只有在 buffer 有空間時才發
+
+        // ★ 直接用 bleuart.print()，不檢查 availableForWrite()
+        // 因為 BLEUart 沒有實作 availableForWrite()，
+        // 它繼承的 Stream 基類永遠回傳 0（這就是 buffer=0 的原因！）
+        // bleuart.write() 內部已有 notifyEnabled() 檢查
         char buf[16];
         snprintf(buf, sizeof(buf), "IIC:0x%02X\n", address);
-        if (bleuart.availableForWrite() >= (int)strlen(buf)) {
-          bleuart.print(buf);
-          delay(50);
-        }
+        bleuart.print(buf);
+        delay(100); // 讓 BLE 協議棧有時間處理
+
         if (address == BMP581_ADDR) foundBMP581 = true;
         nDevices++;
       }
       delay(2);
     }
 
-    const char* result = (nDevices == 0) ? "IIC:NONE\n" :
-                         (foundBMP581)   ? "BMP:OK\n" : "BMP:ERR\n";
-    if (bleuart.availableForWrite() >= (int)strlen(result)) {
-      bleuart.print(result);
+    if (nDevices == 0) {
+      bleuart.print("IIC:NONE\n");
+    } else if (foundBMP581) {
+      bleuart.print("BMP:OK\n");
+    } else {
+      bleuart.print("BMP:ERR\n");
     }
-    Serial.println(result);
+    Serial.println(foundBMP581 ? "BMP:OK" : "BMP:ERR");
   }
 
   // ================= 定時量測與發送 =================
@@ -132,30 +133,34 @@ void loop() {
       lastSampleTime = millis();
 
       float pressure = bmp58x.readPressPa();
-      String statusVal = (pressure > 0) ? "1" : "0";
 
-      // 極簡消息: "B:99183|S:1\n" ≈ 15 bytes = 1 個 BLE notification
+      // ★ 關鍵修正：直接用 bleuart.print() 發送！
+      // 
+      // 之前的錯誤：用 bleuart.availableForWrite() 做流控
+      // 但 BLEUart 類別沒有覆寫 availableForWrite()，
+      // 它繼承自 Arduino Stream 基類，默認返回 0。
+      // 所以「buffer=0」不是 BLE 緩衝區滿，而是函數根本沒實作！
+      //
+      // bleuart.write() 內部（BLEUart.cpp:250）已經有：
+      //   if (!notifyEnabled(conn_hdl)) return 0;
+      // 所以如果 CCCD 未訂閱，write 會安全地跳過，不會阻塞。
+      //
+      // 而 BLECharacteristic::notify() 內部會用 SoftDevice 的
+      // sd_ble_gatts_hvx() 來發送，有 HVN queue 管理。
+
       char dataMsg[32];
-      snprintf(dataMsg, sizeof(dataMsg), "B:%ld|S:%s\n", (long)pressure, statusVal.c_str());
+      snprintf(dataMsg, sizeof(dataMsg), "B:%ld|S:1\n", (long)pressure);
+      bleuart.print(dataMsg);
 
-      int avail = bleuart.availableForWrite();
-      if (avail >= (int)strlen(dataMsg)) {
-        bleuart.print(dataMsg);
-        Serial.print("TX: ");
-        Serial.print(dataMsg);
-      } else {
-        // 不跳過，等一下再試
-        Serial.print("wait(avail=");
-        Serial.print(avail);
-        Serial.println(")");
-      }
+      Serial.print("TX: ");
+      Serial.print(dataMsg);
     }
   }
 
   delay(1);
 }
 
-// ================= Callbacks（只設標誌位，不寫 bleuart）=================
+// ================= Callbacks（只設標誌位）=================
 
 void connect_callback(uint16_t conn_handle) {
   char central_name[32] = { 0 };
@@ -184,9 +189,10 @@ void rx_callback(uint16_t conn_handle) {
   cmd.toUpperCase();
 
   if (cmd == "S") {
-    Serial.print("收到 S，buffer=");
-    Serial.println(bleuart.availableForWrite());
     isSendingData = true;
+    // 打印 notifyEnabled 的真實狀態做診斷
+    Serial.print("收到 S，notifyEnabled=");
+    Serial.println(bleuart.notifyEnabled() ? "YES" : "NO");
   } else if (cmd == "P") {
     isSendingData = false;
     Serial.println("收到 P (暫停)");
