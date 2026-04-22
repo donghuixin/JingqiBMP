@@ -13,6 +13,8 @@ BLEUart bleuart;
 // ================= 狀態控制變數 =================
 bool isSendingData = false;
 unsigned long lastSampleTime = 0;
+float lastPressure = 0;
+int stuckCounter = 0;
 
 // 20Hz 採樣，每次發送 1 筆
 const int SAMPLE_INTERVAL_MS = 50;  // 50ms = 20Hz
@@ -150,6 +152,26 @@ void loop() {
       lastSampleTime = millis();
 
       float pressure = bmp58x.readPressPa();
+
+      // ★ 動態健康檢查：檢測數值是否卡死
+      if (pressure == lastPressure) {
+        stuckCounter++;
+      } else {
+        stuckCounter = 0; // 有變化就清零
+        lastPressure = pressure;
+      }
+
+      // 如果連續 10 次數值一模一樣 (代表感測器死機或庫函數出錯)
+      if (stuckCounter >= 10) {
+        Serial.println("偵測到傳感器卡死！嘗試重新喚醒...");
+        bleuart.print("SYS: Sensor Stuck! Restarting...\n");
+        
+        // 強制重新初始化傳感器
+        initSensor();
+        stuckCounter = 0;
+        lastPressure = 0;
+        return; // 跳出這次循環，等下一次
+      }
 
       // ★ 關鍵修正：直接用 bleuart.print() 發送！
       // 
