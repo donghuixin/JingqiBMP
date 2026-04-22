@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BMP581 Sensor Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Mac OS 扁平化設計規範 */
+        :root {
+            --bg-color: #fbfbfd;
+            --card-bg: rgba(255, 255, 255, 0.7);
+            --text-primary: #1d1d1f;
+            --text-secondary: #86868b;
+            --accent-blue: #0071e3;
+            --accent-blue-hover: #0077ED;
+            --accent-red: #ff3b30;
+            --border-radius: 20px;
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
+            --blur: blur(20px);
+        }
+
+        body {
+            margin: 0;
+            padding: 40px 20px;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            max-width: 1000px;
+            width: 100%;
+            display: grid;
+            grid-template-columns: 1fr 3fr;
+            gap: 24px;
+        }
+
+        /* 頂部標題 */
+        .header {
+            grid-column: 1 / -1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            margin: 0;
+        }
+
+        .status-badge {
+            padding: 6px 14px;
+            border-radius: 30px;
+            font-size: 14px;
+            font-weight: 500;
+            background: #e5e5ea;
+            color: var(--text-secondary);
+            transition: all 0.3s ease;
+        }
+        .status-badge.connected {
+            background: #e3f2fd;
+            color: var(--accent-blue);
+        }
+
+        /* 卡片共用樣式 */
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: var(--blur);
+            -webkit-backdrop-filter: var(--blur);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            border-radius: var(--border-radius);
+            padding: 24px;
+            box-shadow: var(--shadow);
+        }
+
+        /* 控制面板 (左側) */
+        .control-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .btn {
+            border: none;
+            padding: 14px 20px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            width: 100%;
+            font-family: inherit;
+        }
+
+        .btn-primary {
+            background-color: var(--accent-blue);
+            color: white;
+        }
+        .btn-primary:hover { background-color: var(--accent-blue-hover); }
+        .btn-primary:disabled { background-color: #a1c6ea; cursor: not-allowed; }
+
+        .btn-secondary {
+            background-color: #f5f5f7;
+            color: var(--text-primary);
+        }
+        .btn-secondary:hover { background-color: #e8e8ed; }
+
+        .btn-danger {
+            background-color: #ffeeed;
+            color: var(--accent-red);
+        }
+        .btn-danger:hover { background-color: #ffdcd9; }
+
+        /* 數據顯示區域 */
+        .data-display {
+            text-align: center;
+            padding: 30px 0;
+            border-bottom: 1px solid #e5e5ea;
+            margin-bottom: 16px;
+        }
+        
+        .data-value {
+            font-size: 48px;
+            font-weight: 700;
+            letter-spacing: -0.04em;
+            margin: 10px 0;
+            color: var(--text-primary);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .data-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        /* 圖表與終端面板 (右側) */
+        .main-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 350px;
+            width: 100%;
+        }
+
+        .terminal {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            font-family: "SF Mono", Menlo, Consolas, monospace;
+            font-size: 13px;
+            padding: 16px;
+            border-radius: 12px;
+            height: 150px;
+            overflow-y: auto;
+            line-height: 1.5;
+        }
+        .terminal span { color: #569cd6; } /* 藍色高亮時間戳 */
+
+        @media (max-width: 768px) {
+            .container { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>BMP581 Monitor</h1>
+        <div id="statusBadge" class="status-badge">Disconnected</div>
+    </div>
+
+    <div class="control-panel card">
+        <button id="btnConnect" class="btn btn-primary">連線設備 (Connect)</button>
+        <button id="btnDisconnect" class="btn btn-secondary" style="display: none;">斷開連線</button>
+        
+        <div class="data-display">
+            <div class="data-label">即時大氣壓力 (Pressure)</div>
+            <div id="pressureValue" class="data-value">--</div>
+            <div class="data-label">Pa</div>
+        </div>
+
+        <div style="display: flex; gap: 10px;">
+            <button id="btnStart" class="btn btn-primary" disabled>開始 (S)</button>
+            <button id="btnPause" class="btn btn-danger" disabled>暫停 (P)</button>
+            <button id="btnCheck" class="btn btn-secondary" disabled>自查 (C)</button>
+        </div>
+    </div>
+
+    <div class="main-panel card">
+        <div>
+            <div class="data-label" style="margin-bottom: 10px;">壓力趨勢圖 (Trend)</div>
+            <div class="chart-container">
+                <canvas id="pressureChart"></canvas>
+            </div>
+        </div>
+        
+        <div>
+            <div class="data-label" style="margin-bottom: 10px;">設備日誌 (Device Log)</div>
+            <div id="terminal" class="terminal"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ================== Nordic UART Service (NUS) UUIDs ==================
+    const NUS_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+    const NUS_RX_CHAR_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // 寫入 (發送指令)
+    const NUS_TX_CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // 讀取 (接收數據)
+
+    let bleDevice;
+    let rxCharacteristic;
+    let rxBuffer = '';
+
+    // ================== UI 元素綁定 ==================
+    const btnConnect = document.getElementById('btnConnect');
+    const btnDisconnect = document.getElementById('btnDisconnect');
+    const btnStart = document.getElementById('btnStart');
+    const btnPause = document.getElementById('btnPause');
+    const btnCheck = document.getElementById('btnCheck');
+    const statusBadge = document.getElementById('statusBadge');
+    const pressureValue = document.getElementById('pressureValue');
+    const terminal = document.getElementById('terminal');
+
+    // ================== Chart.js 初始化 ==================
+    const ctx = document.getElementById('pressureChart').getContext('2d');
+    const chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Pressure (Pa)',
+                data: [],
+                borderColor: '#0071e3',
+                backgroundColor: 'rgba(0, 113, 227, 0.1)',
+                borderWidth: 2,
+                pointRadius: 0,
+                fill: true,
+                tension: 0.4 // 平滑曲線
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { display: false }, // 隱藏 X 軸標籤讓畫面更簡潔
+                y: {
+                    grid: { color: '#f0f0f0' },
+                    ticks: { color: '#86868b' }
+                }
+            },
+            plugins: {
+                legend: { display: false }
+            },
+            animation: { duration: 0 } // 關閉動畫提升實時效能
+        }
+    });
+
+    // 最大顯示資料點
+    const MAX_DATA_POINTS = 50;
+
+    function updateChart(value) {
+        const now = new Date().toLocaleTimeString();
+        chart.data.labels.push(now);
+        chart.data.datasets[0].data.push(value);
+
+        if (chart.data.labels.length > MAX_DATA_POINTS) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+        }
+        chart.update();
+    }
+
+    function log(message) {
+        const time = new Date().toLocaleTimeString();
+        terminal.innerHTML += `<span>[${time}]</span> ${message}<br>`;
+        terminal.scrollTop = terminal.scrollHeight;
+    }
+
+    // ================== 藍牙核心邏輯 ==================
+    btnConnect.addEventListener('click', async () => {
+        try {
+            log("正在請求藍牙設備...");
+            bleDevice = await navigator.bluetooth.requestDevice({
+                filters: [{ namePrefix: 'JingQi' }], // 根據你韌體設定的名稱過濾
+                optionalServices: [NUS_SERVICE_UUID]
+            });
+
+            bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+            log("連接 GATT 伺服器...");
+            const server = await bleDevice.gatt.connect();
+
+            log("獲取 NUS 服務...");
+            const service = await server.getPrimaryService(NUS_SERVICE_UUID);
+
+            log("配置特徵值...");
+            rxCharacteristic = await service.getCharacteristic(NUS_RX_CHAR_UUID);
+            const txCharacteristic = await service.getCharacteristic(NUS_TX_CHAR_UUID);
+
+            await txCharacteristic.startNotifications();
+            txCharacteristic.addEventListener('characteristicvaluechanged', handleNotifications);
+
+            // 更新 UI 狀態
+            statusBadge.textContent = "Connected";
+            statusBadge.classList.add("connected");
+            btnConnect.style.display = 'none';
+            btnDisconnect.style.display = 'block';
+            btnStart.disabled = false;
+            btnCheck.disabled = false;
+            btnPause.disabled = false;
+
+            log("✅ 連線成功！等待設備就緒訊號...");
+
+        } catch (error) {
+            log("❌ 連線失敗: " + error);
+        }
+    });
+
+    btnDisconnect.addEventListener('click', () => {
+        if (!bleDevice) return;
+        if (bleDevice.gatt.connected) {
+            bleDevice.gatt.disconnect();
+        }
+    });
+
+    function onDisconnected() {
+        statusBadge.textContent = "Disconnected";
+        statusBadge.classList.remove("connected");
+        btnConnect.style.display = 'block';
+        btnDisconnect.style.display = 'none';
+        btnStart.disabled = true;
+        btnCheck.disabled = true;
+        btnPause.disabled = true;
+        log("⚠️ 設備已斷開連線。");
+    }
+
+    // 處理收到的數據 (包含斷行處理)
+    function handleNotifications(event) {
+        const value = new TextDecoder().decode(event.target.value);
+        rxBuffer += value;
+        
+        let lines = rxBuffer.split('\n');
+        rxBuffer = lines.pop(); // 保留未完整的最後一段字串在 buffer 中
+
+        for (let line of lines) {
+            line = line.trim();
+            if (line === '') continue;
+
+            log("Rx: " + line);
+
+            // 解析氣壓數據，例如韌體發送 "Press: 101325.50 Pa"
+            if (line.startsWith("Press:")) {
+                // 提取數字部分
+                let pressureStr = line.replace("Press: ", "").replace(" Pa", "");
+                let pressureNum = parseFloat(pressureStr);
+                
+                if (!isNaN(pressureNum)) {
+                    pressureValue.textContent = pressureNum.toFixed(2);
+                    updateChart(pressureNum);
+                }
+            }
+        }
+    }
+
+    // 發送指令到設備
+    async function sendCommand(cmd) {
+        if (!rxCharacteristic) return;
+        try {
+            const encoder = new TextEncoder();
+            await rxCharacteristic.writeValue(encoder.encode(cmd));
+            log("Tx: " + cmd);
+        } catch (error) {
+            log("❌ 發送失敗: " + error);
+        }
+    }
+
+    btnCheck.addEventListener('click', () => sendCommand('C'));
+    btnStart.addEventListener('click', () => sendCommand('S'));
+    btnPause.addEventListener('click', () => sendCommand('P'));
+
+</script>
+</body>
+</html>
