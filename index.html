@@ -1,445 +1,528 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BMP581 Sensor Dashboard</title>
+    <title>BMP581 Monitor</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        /* Mac OS 扁平化設計規範 */
         :root {
-            --bg-color: #fbfbfd;
-            --card-bg: rgba(255, 255, 255, 0.7);
-            --text-primary: #1d1d1f;
-            --text-secondary: #86868b;
-            --accent-blue: #0071e3;
-            --accent-blue-hover: #0077ED;
-            --accent-red: #ff3b30;
-            --border-radius: 20px;
-            --shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
-            --blur: blur(20px);
+            --bg: #f7f8fb;
+            --panel: rgba(255, 255, 255, 0.88);
+            --text: #1f2430;
+            --muted: #768197;
+            --line: #e7eaf0;
+            --blue: #1677ff;
+            --blue-soft: rgba(22, 119, 255, 0.12);
+            --red: #ef4444;
+            --btn: #f1f3f7;
+        }
+
+        * {
+            box-sizing: border-box;
         }
 
         body {
             margin: 0;
-            padding: 40px 20px;
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-            display: flex;
-            justify-content: center;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
         }
 
-        .container {
-            max-width: 1000px;
-            width: 100%;
-            display: grid;
-            grid-template-columns: 1fr 3fr;
-            gap: 24px;
+        .page {
+            max-width: 1240px;
+            margin: 0 auto;
+            padding: 28px 24px 32px;
         }
 
-        /* 頂部標題 */
         .header {
-            grid-column: 1 / -1;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 10px;
+            margin-bottom: 24px;
         }
 
-        h1 {
-            font-size: 28px;
-            font-weight: 600;
-            letter-spacing: -0.02em;
+        .header h1 {
             margin: 0;
+            font-size: 28px;
+            font-weight: 650;
         }
 
-        .status-badge {
-            padding: 6px 14px;
-            border-radius: 30px;
+        .status {
+            border-radius: 999px;
+            padding: 8px 16px;
+            background: #e9eef6;
+            color: var(--muted);
             font-size: 14px;
-            font-weight: 500;
-            background: #e5e5ea;
-            color: var(--text-secondary);
-            transition: all 0.3s ease;
-        }
-        .status-badge.connected {
-            background: #e3f2fd;
-            color: var(--accent-blue);
+            font-weight: 600;
         }
 
-        /* 卡片共用樣式 */
-        .card {
-            background: var(--card-bg);
-            backdrop-filter: var(--blur);
-            -webkit-backdrop-filter: var(--blur);
-            border: 1px solid rgba(255, 255, 255, 0.5);
-            border-radius: var(--border-radius);
-            padding: 24px;
-            box-shadow: var(--shadow);
+        .status.connected {
+            background: #e8f1ff;
+            color: var(--blue);
         }
 
-        /* 控制面板 (左側) */
-        .control-panel {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-
-        .btn {
-            border: none;
-            padding: 14px 20px;
-            border-radius: 12px;
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            width: 100%;
-            font-family: inherit;
-        }
-
-        .btn-primary {
-            background-color: var(--accent-blue);
-            color: white;
-        }
-        .btn-primary:hover { background-color: var(--accent-blue-hover); }
-        .btn-primary:disabled { background-color: #a1c6ea; cursor: not-allowed; }
-
-        .btn-secondary {
-            background-color: #f5f5f7;
-            color: var(--text-primary);
-        }
-        .btn-secondary:hover { background-color: #e8e8ed; }
-
-        .btn-danger {
-            background-color: #ffeeed;
-            color: var(--accent-red);
-        }
-        .btn-danger:hover { background-color: #ffdcd9; }
-
-        /* 數據顯示區域 */
-        .data-display {
-            text-align: center;
-            padding: 30px 0;
-            border-bottom: 1px solid #e5e5ea;
-            margin-bottom: 16px;
-        }
-        
-        .data-value {
-            font-size: 48px;
-            font-weight: 700;
-            letter-spacing: -0.04em;
-            margin: 10px 0;
-            color: var(--text-primary);
-            font-variant-numeric: tabular-nums;
-        }
-
-        .data-label {
-            font-size: 14px;
-            color: var(--text-secondary);
-            font-weight: 500;
-        }
-
-        /* 圖表與終端面板 (右側) */
-        .main-panel {
-            display: flex;
-            flex-direction: column;
+        .layout {
+            display: grid;
+            grid-template-columns: 320px minmax(0, 1fr);
             gap: 24px;
         }
 
-        .chart-container {
-            position: relative;
-            height: 350px;
-            width: 100%;
+        .panel {
+            background: var(--panel);
+            border: 1px solid rgba(255, 255, 255, 0.7);
+            border-radius: 20px;
+            box-shadow: 0 8px 30px rgba(18, 32, 59, 0.06);
+            backdrop-filter: blur(12px);
+            padding: 24px;
         }
 
-        .terminal {
-            background: #1e1e1e;
-            color: #d4d4d4;
-            font-family: "SF Mono", Menlo, Consolas, monospace;
-            font-size: 13px;
-            padding: 16px;
+        .left {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .btn {
+            appearance: none;
+            border: none;
             border-radius: 12px;
-            height: 150px;
-            overflow-y: auto;
-            line-height: 1.5;
+            padding: 14px 18px;
+            width: 100%;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            background: var(--btn);
+            color: var(--text);
         }
-        .terminal span { color: #569cd6; } /* 藍色高亮時間戳 */
 
-        @media (max-width: 768px) {
-            .container { grid-template-columns: 1fr; }
+        .btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.55;
+        }
+
+        .btn-primary {
+            background: var(--blue);
+            color: #fff;
+        }
+
+        .btn-danger {
+            background: #feeceb;
+            color: var(--red);
+        }
+
+        .mini {
+            display: grid;
+            gap: 8px;
+            padding: 14px 16px;
+            border-radius: 14px;
+            background: rgba(15, 23, 42, 0.03);
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .pressure {
+            padding: 22px 0 10px;
+            border-bottom: 1px solid var(--line);
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .pressure-label {
+            color: var(--muted);
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .pressure-value {
+            margin: 14px 0 10px;
+            font-size: 64px;
+            line-height: 1;
+            font-weight: 700;
+            letter-spacing: 0;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .pressure-meta {
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+
+        .main {
+            display: grid;
+            gap: 24px;
+        }
+
+        .section-title {
+            margin: 0 0 14px;
+            color: var(--muted);
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .chart-wrap {
+            height: 420px;
+        }
+
+        .log {
+            height: 220px;
+            overflow-y: auto;
+            border-radius: 14px;
+            background: #161b22;
+            color: #d7dde7;
+            padding: 14px 16px;
+            font: 13px/1.55 Consolas, "SFMono-Regular", monospace;
+        }
+
+        .log span {
+            color: #72a7ff;
+        }
+
+        @media (max-width: 980px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
 <body>
-
-<div class="container">
+<div class="page">
     <div class="header">
         <h1>BMP581 Monitor</h1>
-        <div id="statusBadge" class="status-badge">Disconnected</div>
+        <div id="statusBadge" class="status">Disconnected</div>
     </div>
 
-    <div class="control-panel card">
-        <button id="btnConnect" class="btn btn-primary">連線設備 (Connect)</button>
-        <button id="btnDisconnect" class="btn btn-secondary" style="display: none;">斷開連線</button>
-        
-        <div class="data-display">
-            <div style="display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--text-secondary); margin-bottom: 20px; text-align: left; background: rgba(0,0,0,0.03); padding: 12px; border-radius: 12px;">
-                <div>初始化狀態: <strong id="initStatus">未初始化</strong></div>
-                <div>采樣率: <strong id="sampleRate">--</strong></div>
+    <div class="layout">
+        <div class="panel left">
+            <button id="btnConnect" class="btn btn-primary">连接设备</button>
+            <button id="btnDisconnect" class="btn" style="display:none;">断开连接</button>
+
+            <div class="mini">
+                <div>初始化状态: <strong id="initStatus">未初始化</strong></div>
+                <div>采样率: <strong id="sampleRate">--</strong></div>
                 <div>量程: <strong id="rangeValue">--</strong></div>
             </div>
-            <div class="data-label">即時大氣壓力 (Pressure)</div>
-            <div id="pressureValue" class="data-value">--</div>
-            <div class="data-label">Pa | 傳感器狀態: <span id="sensorStatus">不明</span></div>
-        </div>
 
-        <div style="display: flex; gap: 10px;">
-            <button id="btnStart" class="btn btn-primary" disabled>開始 (S)</button>
-            <button id="btnPause" class="btn btn-danger" disabled>暫停 (P)</button>
-            <button id="btnCheck" class="btn btn-secondary" disabled>自查 (C)</button>
-        </div>
-    </div>
+            <div class="pressure">
+                <div class="pressure-label">即时大气压力</div>
+                <div id="pressureValue" class="pressure-value">--</div>
+                <div class="pressure-meta">Pa | 传感器状态: <strong id="sensorStatus">未知</strong></div>
+            </div>
 
-    <div class="main-panel card">
-        <div>
-            <div class="data-label" style="margin-bottom: 10px;">壓力趨勢圖 (Trend)</div>
-            <div class="chart-container">
-                <canvas id="pressureChart"></canvas>
+            <div class="controls">
+                <button id="btnStart" class="btn btn-primary" disabled>开始(S)</button>
+                <button id="btnPause" class="btn btn-danger" disabled>暂停(P)</button>
+                <button id="btnCheck" class="btn" disabled>自查(C)</button>
             </div>
         </div>
-        
-        <div>
-            <div class="data-label" style="margin-bottom: 10px;">設備日誌 (Device Log)</div>
-            <div id="terminal" class="terminal"></div>
+
+        <div class="panel main">
+            <div>
+                <div class="section-title">压力趋势图</div>
+                <div class="chart-wrap">
+                    <canvas id="pressureChart"></canvas>
+                </div>
+            </div>
+
+            <div>
+                <div class="section-title">设备日志</div>
+                <div id="terminal" class="log"></div>
+            </div>
         </div>
     </div>
 </div>
 
 <script>
-    // ================== Nordic UART Service (NUS) UUIDs ==================
-    const NUS_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
-    const NUS_RX_CHAR_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // 寫入 (發送指令)
-    const NUS_TX_CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // 讀取 (接收數據)
+const NUS_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const NUS_RX_CHAR_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+const NUS_TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 
-    let bleDevice;
-    let rxCharacteristic;
-    let rxBuffer = '';
+const MAX_DATA_POINTS = 500;
+const MIN_VALID_PRESSURE_PA = 30000;
+const MAX_VALID_PRESSURE_PA = 125000;
+const MAX_PRESSURE_STEP_PA = 5000;
 
-    // ================== UI 元素綁定 ==================
-    const btnConnect = document.getElementById('btnConnect');
-    const btnDisconnect = document.getElementById('btnDisconnect');
-    const btnStart = document.getElementById('btnStart');
-    const btnPause = document.getElementById('btnPause');
-    const btnCheck = document.getElementById('btnCheck');
-    const statusBadge = document.getElementById('statusBadge');
-    const pressureValue = document.getElementById('pressureValue');
-    const sensorStatus = document.getElementById('sensorStatus');
-    const initStatus = document.getElementById('initStatus');
-    const sampleRate = document.getElementById('sampleRate');
-    const rangeValue = document.getElementById('rangeValue');
-    const terminal = document.getElementById('terminal');
+let bleDevice = null;
+let rxCharacteristic = null;
+let txCharacteristic = null;
+let rxBuffer = "";
+let lastAcceptedPressure = null;
+let sampleIndex = 0;
 
-    // ================== Chart.js 初始化 ==================
-    const ctx = document.getElementById('pressureChart').getContext('2d');
-    const chart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: [],
-            datasets: [{
-                label: 'Pressure (Pa)',
-                data: [],
-                borderColor: '#0071e3',
-                backgroundColor: 'rgba(0, 113, 227, 0.1)',
-                borderWidth: 2,
-                pointRadius: 0,
-                fill: true,
-                tension: 0.4 // 平滑曲線
-            }]
+const btnConnect = document.getElementById("btnConnect");
+const btnDisconnect = document.getElementById("btnDisconnect");
+const btnStart = document.getElementById("btnStart");
+const btnPause = document.getElementById("btnPause");
+const btnCheck = document.getElementById("btnCheck");
+const statusBadge = document.getElementById("statusBadge");
+const pressureValue = document.getElementById("pressureValue");
+const sensorStatus = document.getElementById("sensorStatus");
+const initStatus = document.getElementById("initStatus");
+const sampleRate = document.getElementById("sampleRate");
+const rangeValue = document.getElementById("rangeValue");
+const terminal = document.getElementById("terminal");
+
+function log(message) {
+    const time = new Date().toLocaleTimeString();
+    terminal.innerHTML += `<span>[${time}]</span> ${message}<br>`;
+    terminal.scrollTop = terminal.scrollHeight;
+}
+
+function resetChart() {
+    sampleIndex = 0;
+    lastAcceptedPressure = null;
+    chart.data.labels = [];
+    chart.data.datasets[0].data = [];
+    chart.update("none");
+}
+
+function setDisconnectedState() {
+    statusBadge.textContent = "Disconnected";
+    statusBadge.classList.remove("connected");
+    btnConnect.style.display = "block";
+    btnDisconnect.style.display = "none";
+    btnStart.disabled = true;
+    btnPause.disabled = true;
+    btnCheck.disabled = true;
+    initStatus.textContent = "未初始化";
+    initStatus.style.color = "";
+    sampleRate.textContent = "--";
+    rangeValue.textContent = "--";
+    sensorStatus.textContent = "未知";
+    sensorStatus.style.color = "";
+    rxBuffer = "";
+    resetChart();
+}
+
+const ctx = document.getElementById("pressureChart").getContext("2d");
+const chart = new Chart(ctx, {
+    type: "line",
+    data: {
+        labels: [],
+        datasets: [{
+            label: "Pressure (Pa)",
+            data: [],
+            borderColor: "#1677ff",
+            backgroundColor: "rgba(22, 119, 255, 0.12)",
+            borderWidth: 2,
+            pointRadius: 0,
+            fill: true,
+            tension: 0
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: {
+            legend: { display: false }
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                x: { display: false }, // 隱藏 X 軸標籤讓畫面更簡潔
-                y: {
-                    grid: { color: '#f0f0f0' },
-                    ticks: { color: '#86868b' }
-                }
-            },
-            plugins: {
-                legend: { display: false }
-            },
-            animation: false // 關閉動畫提升 10Hz 實時效能
-        }
-    });
-
-    // 最大顯示資料點 (現在 100Hz 採樣，如果設定 500 代表可以看到 5 秒的資料)
-    const MAX_DATA_POINTS = 500;
-
-    function log(message) {
-        const time = new Date().toLocaleTimeString();
-        terminal.innerHTML += `<span>[${time}]</span> ${message}<br>`;
-        terminal.scrollTop = terminal.scrollHeight;
-    }
-
-    // ================== 藍牙核心邏輯 ==================
-    btnConnect.addEventListener('click', async () => {
-        try {
-            log("正在請求藍牙設備...");
-            bleDevice = await navigator.bluetooth.requestDevice({
-                filters: [{ namePrefix: 'JingQi' }], // 根據你韌體設定的名稱過濾
-                optionalServices: [NUS_SERVICE_UUID]
-            });
-
-            bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
-
-            log("連接 GATT 伺服器...");
-            const server = await bleDevice.gatt.connect();
-
-            log("獲取 NUS 服務...");
-            const service = await server.getPrimaryService(NUS_SERVICE_UUID);
-
-            log("配置特徵值...");
-            rxCharacteristic = await service.getCharacteristic(NUS_RX_CHAR_UUID);
-            const txCharacteristic = await service.getCharacteristic(NUS_TX_CHAR_UUID);
-
-            await txCharacteristic.startNotifications();
-            txCharacteristic.addEventListener('characteristicvaluechanged', handleNotifications);
-
-            // 更新 UI 狀態
-            statusBadge.textContent = "Connected";
-            statusBadge.classList.add("connected");
-            btnConnect.style.display = 'none';
-            btnDisconnect.style.display = 'block';
-            btnStart.disabled = false;
-            btnCheck.disabled = false;
-            btnPause.disabled = false;
-
-            log("✅ 連線成功！等待設備就緒訊號...");
-
-        } catch (error) {
-            log("❌ 連線失敗: " + error);
-        }
-    });
-
-    btnDisconnect.addEventListener('click', () => {
-        if (!bleDevice) return;
-        if (bleDevice.gatt.connected) {
-            bleDevice.gatt.disconnect();
-        }
-    });
-
-    function onDisconnected() {
-        statusBadge.textContent = "Disconnected";
-        statusBadge.classList.remove("connected");
-        btnConnect.style.display = 'block';
-        btnDisconnect.style.display = 'none';
-        btnStart.disabled = true;
-        btnCheck.disabled = true;
-        btnPause.disabled = true;        
-        initStatus.textContent = "未初始化";
-        initStatus.style.color = "";
-        sampleRate.textContent = "--";
-        rangeValue.textContent = "--";
-                log("⚠️ 設備已斷開連線。");
-    }
-
-    // 處理收到的數據 (包含斷行處理)
-    function handleNotifications(event) {
-        const value = new TextDecoder().decode(event.target.value);
-        rxBuffer += value;
-        
-        let lines = rxBuffer.split('\n');
-        rxBuffer = lines.pop(); // 保留未完整的最後一段字串在 buffer 中
-
-        for (let line of lines) {
-            line = line.trim();
-            if (line === '') continue;
-
-            log("Rx: " + line);
-
-            // 解析初始化狀態訊息
-            if (line.startsWith("INIT:OK")) {
-                initStatus.textContent = "成功";
-                initStatus.style.color = "var(--accent-blue)";
-            } else if (line.startsWith("INIT:FAIL")) {
-                initStatus.textContent = "失敗!";
-                initStatus.style.color = "var(--accent-red)";
-                sampleRate.textContent = "--";
-                rangeValue.textContent = "--";
-            } else if (line.startsWith("SR:")) {
-                sampleRate.textContent = line.replace("SR:", "").trim();
-            } else if (line.startsWith("RNG:")) {
-                rangeValue.textContent = line.replace("RNG:", "").trim();
-            } else if (line === "READY") {
-                log("✅ 設備就緒，可以開始操作");
-            } else if (line.startsWith("CMD:")) {
-                log("📋 可用指令: " + line.replace("CMD:", ""));
-            } else if (line.startsWith("IIC:") || line.startsWith("BMP:")) {
-                log("🔍 " + line);
+        scales: {
+            x: { display: false },
+            y: {
+                grid: { color: "#eef2f7" },
+                ticks: { color: "#768197" }
             }
+        }
+    }
+});
 
-            // 解析打包發送的氣壓數據，格式如 "B:99120,99121,...|S:1"
-            if (line.startsWith("B:")) {
-                const parts = line.split("|S:");
-                
-                if (parts.length === 2) {
-                    const statusStr = parts[1].trim();
-                    if (statusStr === "1") {
-                        sensorStatus.textContent = "OK";
-                        sensorStatus.style.color = "var(--accent-blue)";
-                    } else {
-                        sensorStatus.textContent = "Error";
-                        sensorStatus.style.color = "var(--accent-red)";
-                    }
-                }
-                
-                // 提取並解析這批的壓力數值
-                let dataStr = parts[0].replace("B:", "");
-                let valuesStrArray = dataStr.split(",");
-                let lastValidPressure = 0;
-                
-                for (let v of valuesStrArray) {
-                    let pressureNum = parseFloat(v);
-                    if (!isNaN(pressureNum)) {
-                        lastValidPressure = pressureNum;
-                        const nowTime = new Date().toLocaleTimeString();
-                        chart.data.labels.push(nowTime);
-                        chart.data.datasets[0].data.push(pressureNum);
-                    }
-                }
-                
-                // 確保圖表資料不會無限膨脹
-                while (chart.data.labels.length > MAX_DATA_POINTS) {
-                    chart.data.labels.shift();
-                    chart.data.datasets[0].data.shift();
-                }
-                
-                if (lastValidPressure !== 0) {
-                    pressureValue.textContent = lastValidPressure.toFixed(2);
-                    chart.update('none');
-                }
+btnConnect.addEventListener("click", async () => {
+    try {
+        log("Requesting Bluetooth device...");
+        bleDevice = await navigator.bluetooth.requestDevice({
+            filters: [{ namePrefix: "JingQi" }],
+            optionalServices: [NUS_SERVICE_UUID]
+        });
+
+        bleDevice.addEventListener("gattserverdisconnected", onDisconnected);
+
+        log("Connecting GATT server...");
+        const server = await bleDevice.gatt.connect();
+
+        log("Getting NUS service...");
+        const service = await server.getPrimaryService(NUS_SERVICE_UUID);
+
+        log("Configuring characteristics...");
+        rxCharacteristic = await service.getCharacteristic(NUS_RX_CHAR_UUID);
+        txCharacteristic = await service.getCharacteristic(NUS_TX_CHAR_UUID);
+
+        await txCharacteristic.startNotifications();
+        txCharacteristic.addEventListener("characteristicvaluechanged", handleNotifications);
+
+        statusBadge.textContent = "Connected";
+        statusBadge.classList.add("connected");
+        btnConnect.style.display = "none";
+        btnDisconnect.style.display = "block";
+        btnStart.disabled = false;
+        btnPause.disabled = false;
+        btnCheck.disabled = false;
+
+        log("Connected. Waiting for device data...");
+    } catch (error) {
+        log("Connect failed: " + error);
+    }
+});
+
+btnDisconnect.addEventListener("click", () => {
+    if (bleDevice && bleDevice.gatt.connected) {
+        bleDevice.gatt.disconnect();
+    }
+});
+
+function onDisconnected() {
+    setDisconnectedState();
+    log("Device disconnected.");
+}
+
+function expandPressurePayload(payload) {
+    if (payload.includes("|S:")) {
+        const parts = payload.split("|S:");
+        const statusStr = (parts[1] || "").trim();
+        if (statusStr === "1") {
+            sensorStatus.textContent = "OK";
+            sensorStatus.style.color = "#1677ff";
+        } else {
+            sensorStatus.textContent = "Error";
+            sensorStatus.style.color = "#ef4444";
+        }
+        return parts[0].replace("B:", "").split(",");
+    }
+
+    const compact = payload.replace("B:", "");
+    const compactParts = compact.split(";");
+    const baseValue = parseFloat(compactParts[0]);
+    const values = [];
+
+    if (!isNaN(baseValue)) {
+        values.push(baseValue);
+    }
+
+    if (compactParts.length > 1 && compactParts[1].trim() !== "") {
+        const deltas = compactParts[1].split(",");
+        for (const deltaStr of deltas) {
+            const delta = parseFloat(deltaStr);
+            if (!isNaN(delta) && !isNaN(baseValue)) {
+                values.push(baseValue + delta);
             }
         }
     }
 
-    // 發送指令到設備
-    async function sendCommand(cmd) {
-        if (!rxCharacteristic) return;
-        try {
-            const encoder = new TextEncoder();
-            await rxCharacteristic.writeValue(encoder.encode(cmd));
-            log("Tx: " + cmd);
-        } catch (error) {
-            log("❌ 發送失敗: " + error);
+    sensorStatus.textContent = "OK";
+    sensorStatus.style.color = "#1677ff";
+    return values;
+}
+
+function appendPressurePoints(values) {
+    let lastValidPressure = null;
+
+    for (const raw of values) {
+        const pressureNum = typeof raw === "number" ? raw : parseFloat(raw);
+        const inRange = !isNaN(pressureNum) &&
+            pressureNum >= MIN_VALID_PRESSURE_PA &&
+            pressureNum <= MAX_VALID_PRESSURE_PA;
+        const smoothEnough = lastAcceptedPressure === null ||
+            Math.abs(pressureNum - lastAcceptedPressure) <= MAX_PRESSURE_STEP_PA;
+
+        if (inRange && smoothEnough) {
+            lastValidPressure = pressureNum;
+            lastAcceptedPressure = pressureNum;
+            chart.data.labels.push(sampleIndex++);
+            chart.data.datasets[0].data.push(pressureNum);
         }
     }
 
-    btnCheck.addEventListener('click', () => sendCommand('C'));
-    btnStart.addEventListener('click', () => sendCommand('S'));
-    btnPause.addEventListener('click', () => sendCommand('P'));
+    while (chart.data.labels.length > MAX_DATA_POINTS) {
+        chart.data.labels.shift();
+        chart.data.datasets[0].data.shift();
+    }
 
+    if (lastValidPressure !== null) {
+        pressureValue.textContent = lastValidPressure.toFixed(2);
+        chart.update("none");
+    }
+}
+
+function handleNotifications(event) {
+    const value = new TextDecoder().decode(event.target.value);
+    rxBuffer += value;
+
+    const lines = rxBuffer.split("\n");
+    rxBuffer = lines.pop();
+
+    for (let line of lines) {
+        line = line.trim();
+        if (!line) continue;
+
+        log("Rx: " + line);
+
+        if (line.startsWith("INIT:OK")) {
+            initStatus.textContent = "成功";
+            initStatus.style.color = "#1677ff";
+            continue;
+        }
+
+        if (line.startsWith("INIT:FAIL")) {
+            initStatus.textContent = "失败";
+            initStatus.style.color = "#ef4444";
+            sampleRate.textContent = "--";
+            rangeValue.textContent = "--";
+            continue;
+        }
+
+        if (line.startsWith("SR:")) {
+            sampleRate.textContent = line.replace("SR:", "").trim();
+            continue;
+        }
+
+        if (line.startsWith("RNG:")) {
+            rangeValue.textContent = line.replace("RNG:", "").trim();
+            continue;
+        }
+
+        if (line === "READY") {
+            log("Device ready.");
+            continue;
+        }
+
+        if (line.startsWith("CMD:")) {
+            log("Command list: " + line.replace("CMD:", "").trim());
+            continue;
+        }
+
+        if (line.startsWith("IIC:") || line.startsWith("BMP:")) {
+            log("Check: " + line);
+            continue;
+        }
+
+        if (line.startsWith("B:")) {
+            appendPressurePoints(expandPressurePayload(line));
+        }
+    }
+}
+
+async function sendCommand(cmd) {
+    if (!rxCharacteristic) return;
+    try {
+        const encoder = new TextEncoder();
+        await rxCharacteristic.writeValue(encoder.encode(cmd));
+        log("Tx: " + cmd);
+    } catch (error) {
+        log("Send failed: " + error);
+    }
+}
+
+btnStart.addEventListener("click", () => sendCommand("S"));
+btnPause.addEventListener("click", () => sendCommand("P"));
+btnCheck.addEventListener("click", () => sendCommand("C"));
+
+setDisconnectedState();
 </script>
 </body>
 </html>
